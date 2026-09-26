@@ -28,19 +28,26 @@ class SumFilter:
 
     def _process_data(self, client_id, fruit, amount):
         logging.info(f"Process data")
-        self.amount_by_fruit[fruit] = self.amount_by_fruit.get(
-            fruit, fruit_item.FruitItem(fruit, 0)
+        self.amount_by_fruit[client_id, fruit] = self.amount_by_fruit.get(
+            (client_id, fruit), fruit_item.FruitItem(fruit, 0)
         ) + fruit_item.FruitItem(fruit, int(amount))
 
     def _process_eof(self, client_id):
         logging.info(f"Broadcasting data messages")
-        for final_fruit_item in self.amount_by_fruit.values():
+        for (c_id, fruit), final_fruit_item in self.amount_by_fruit.items():
+            # Only broadcast data from client that sent EOF
+            if c_id != client_id:
+                continue
             for data_output_exchange in self.data_output_exchanges:
                 data_output_exchange.send(
                     message_protocol.internal.serialize(
-                        [client_id, final_fruit_item.fruit, final_fruit_item.amount]
+                        [c_id, fruit, final_fruit_item.amount]
                     )
                 )
+        # After sending all client_id's data, delete it
+        finished_keys = [k for k in self.amount_by_fruit if k[0] == client_id]
+        for k in finished_keys:
+            del self.amount_by_fruit[k]
 
         logging.info(f"Broadcasting EOF message")
         for data_output_exchange in self.data_output_exchanges:

@@ -23,21 +23,22 @@ class AggregationFilter:
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
-        self.fruit_top = []
+        self.fruit_top_by_client = {}
 
     def _process_data(self, client_id, fruit, amount):
         logging.info("Processing data message")
-        for i in range(len(self.fruit_top)):
-            if self.fruit_top[i].fruit == fruit:
-                self.fruit_top[i] = self.fruit_top[i] + fruit_item.FruitItem(
-                    fruit, amount
-                )
+        top = self.fruit_top_by_client.setdefault(client_id, [])
+
+        for i in range(len(top)):
+            if top[i].fruit == fruit:
+                top[i] = top[i] + fruit_item.FruitItem(fruit, amount)
                 return
-        bisect.insort(self.fruit_top, fruit_item.FruitItem(fruit, amount))
+        bisect.insort(top, fruit_item.FruitItem(fruit, amount))
 
     def _process_eof(self, client_id):
         logging.info("Received EOF")
-        fruit_chunk = list(self.fruit_top[-TOP_SIZE:])
+        top = self.fruit_top_by_client.get(client_id, [])
+        fruit_chunk = list(top[-TOP_SIZE:])
         fruit_chunk.reverse()
         fruit_top = list(
             map(
@@ -46,7 +47,7 @@ class AggregationFilter:
             )
         )
         self.output_queue.send(message_protocol.internal.serialize([client_id, fruit_top]))
-        del self.fruit_top
+        self.fruit_top_by_client.pop(client_id, None)
 
     def process_messsage(self, message, ack, nack):
         logging.info("Process message")
