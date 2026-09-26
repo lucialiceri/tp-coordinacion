@@ -24,6 +24,7 @@ class AggregationFilter:
             MOM_HOST, OUTPUT_QUEUE
         )
         self.fruit_top_by_client = {}
+        self.eofs_by_client = {}
 
     def _process_data(self, client_id, fruit, amount):
         logging.info("Processing data message")
@@ -37,7 +38,11 @@ class AggregationFilter:
 
     def _process_eof(self, client_id):
         logging.info("Received EOF")
+        self.eofs_by_client[client_id] = self.eofs_by_client.get(client_id, 0) + 1
+        if self.eofs_by_client[client_id] < SUM_AMOUNT:
+            return
         top = self.fruit_top_by_client.get(client_id, [])
+        top.sort()
         fruit_chunk = list(top[-TOP_SIZE:])
         fruit_chunk.reverse()
         fruit_top = list(
@@ -48,6 +53,7 @@ class AggregationFilter:
         )
         self.output_queue.send(message_protocol.internal.serialize([client_id, fruit_top]))
         self.fruit_top_by_client.pop(client_id, None)
+        self.eofs_by_client.pop(client_id, None)
 
     def process_messsage(self, message, ack, nack):
         logging.info("Process message")

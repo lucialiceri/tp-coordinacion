@@ -15,6 +15,15 @@ AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 
 class SumFilter:
     def __init__(self):
+        self.closing = set() # clients I'm closing and flush cause I recived EOF
+        self.flushed = set() # clients that I've already flushed, just for the eco
+        self.lock = threading.Lock() 
+
+        self.eof_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, ["eof"])
+        self.eof_publisher = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, SUM_CONTROL_EXCHANGE, ["eof"]
+        )
+
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, INPUT_QUEUE
         )
@@ -61,9 +70,40 @@ class SumFilter:
             self._process_data(*fields)
         else:
             self._process_eof(*fields)
+
+            with self.lock:
+                self.flushed.add(fields[0])
+            
+            self.eof_publisher.send(message)
+
+        self._drain_closing()
+
+        ack()
+
+    def _drain_closing(self):
+        with self.lock:
+            for c_id in list(self.closing):
+                self._process_eof(c_id)
+                self.flushed.add(c_id)
+                self.closing.remove(c_id)
+
+    def eof_reciver(self, message, ack, nack):
+        client_id_list = message_protocol.internal.deserialize(message)
+        client_id = client_id_list[0]
+        with self.lock:
+            if client_id not in self.flushed:
+                self.closing.add(client_id)
+                # Thread B tells main, hey check your email! (Adds _drain_closing in the schedule)
+                self.input_queue.connection.add_callback_threadsafe(self._drain_closing)
+        
         ack()
 
     def start(self):
+        t = threading.Thread(
+            target=self.eof_exchange.start_consuming,
+            args=(self.eof_reciver,),
+        )
+        t.start()
         self.input_queue.start_consuming(self.process_data_messsage)
 
 def main():

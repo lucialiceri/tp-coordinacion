@@ -39,6 +39,7 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
             raise MessageMiddlewareMessageError("Already consuming")
         try:
             # When a message is recieved
+            self.channel.basic_qos(prefetch_count=1)
             self.consumer_tag =self.channel.basic_consume(
                 queue = self.queue_name, 
                 on_message_callback=callback
