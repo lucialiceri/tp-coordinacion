@@ -1,6 +1,8 @@
 import os
 import logging
 import threading
+from zlib import crc32
+import signal
 
 from common import middleware, message_protocol, fruit_item
 
@@ -47,12 +49,14 @@ class SumFilter:
             # Only broadcast data from client that sent EOF
             if c_id != client_id:
                 continue
-            for data_output_exchange in self.data_output_exchanges:
-                data_output_exchange.send(
+            
+            # Hash by fruits 
+            self.data_output_exchanges[crc32(fruit.encode("utf-8")) % AGGREGATION_AMOUNT].send(
                     message_protocol.internal.serialize(
                         [c_id, fruit, final_fruit_item.amount]
                     )
                 )
+
         # After sending all client_id's data, delete it
         finished_keys = [k for k in self.amount_by_fruit if k[0] == client_id]
         for k in finished_keys:
@@ -98,6 +102,14 @@ class SumFilter:
         
         ack()
 
+    def handle_sigterm(self, signum, frame):
+        self.input_queue.connection.add_callback_threadsafe(
+            self.input_queue.stop_consuming
+        )
+        self.eof_exchange.connection.add_callback_threadsafe(
+            self.eof_exchange.stop_consuming
+        )
+
     def start(self):
         t = threading.Thread(
             target=self.eof_exchange.start_consuming,
@@ -105,10 +117,18 @@ class SumFilter:
         )
         t.start()
         self.input_queue.start_consuming(self.process_data_messsage)
+        # Wait for Thead B
+        t.join()
+        self.input_queue.close()
+        self.eof_exchange.close()
+        self.eof_publisher.close()
+        for e in self.data_output_exchanges:
+            e.close()
 
 def main():
     logging.basicConfig(level=logging.INFO)
     sum_filter = SumFilter()
+    signal.signal(signal.SIGTERM, sum_filter.handle_sigterm)
     sum_filter.start()
     return 0
 
