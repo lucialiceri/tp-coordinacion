@@ -91,7 +91,7 @@ class SumFilter:
                 self.flushed.add(c_id)
                 self.closing.remove(c_id)
 
-    def eof_reciver(self, message, ack, nack):
+    def eof_receiver(self, message, ack, nack):
         client_id_list = message_protocol.internal.deserialize(message)
         client_id = client_id_list[0]
         with self.lock:
@@ -113,7 +113,7 @@ class SumFilter:
     def start(self):
         t = threading.Thread(
             target=self.eof_exchange.start_consuming,
-            args=(self.eof_reciver,),
+            args=(self.eof_receiver,),
         )
         t.start()
         self.input_queue.start_consuming(self.process_data_messsage)
